@@ -1,0 +1,143 @@
+import torch
+from torch import nn
+
+class ResidualBlockDown(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size, hw=DIM):
+        super(ResBlockDown, self).__init__()
+
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.kernel_size = kernel_size
+        self.bn1 = None
+        self.bn2 = None
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.bn1 = nn.LayerNorm([input_dim, hw, hw])
+        self.bn2 = nn.LayerNorm([input_dim, hw, hw])
+
+        self.conv_shortcut = MeanPoolConv(
+            input_dim, output_dim, kernel_size=1, he_init=False)
+        self.conv_1 = MyConvo2d(
+            input_dim, input_dim, kernel_size=kernel_size, bias=False)
+        self.conv_2 = ConvMeanPool(
+            input_dim, output_dim, kernel_size=kernel_size)
+
+    def forward(self, input):
+        if self.input_dim == self.output_dim:
+            shortcut = input
+        else:
+            shortcut = self.conv_shortcut(input)
+
+        output = input
+        output = self.bn1(output)
+        output = self.relu1(output)
+        output = self.conv_1(output)
+        output = self.bn2(output)
+        output = self.relu2(output)
+        output = self.conv_2(output)
+
+        return shortcut + output
+
+class ResBlockUp(nn.Module):
+    def __init__(self, input_dim, output_dim, kernel_size, resample=None, hw=DIM):
+        super(ResBlock, self).__init__()
+
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.kernel_size = kernel_size
+        self.resample = resample
+        self.bn1 = None
+        self.bn2 = None
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.bn1 = nn.BatchNorm2d(input_dim)
+        self.bn2 = nn.BatchNorm2d(output_dim)
+        
+        self.conv_shortcut = UpSampleConv(
+            input_dim, output_dim, kernel_size=1, he_init=False)
+        self.conv_1 = UpSampleConv(
+            input_dim, output_dim, kernel_size=kernel_size, bias=False)
+        self.conv_2 = MyConvo2d(
+            output_dim, output_dim, kernel_size=kernel_size)
+
+    def forward(self, input):
+        if self.input_dim == self.output_dim:
+            shortcut = input
+        else:
+            shortcut = self.conv_shortcut(input)
+
+        output = input
+        output = self.bn1(output)
+        output = self.relu1(output)
+        output = self.conv_1(output)
+        output = self.bn2(output)
+        output = self.relu2(output)
+        output = self.conv_2(output)
+
+        return shortcut + output
+
+
+class Encoder(nn.Module):
+    def __init__(self):
+        self.conv = nn.Conv2d(3,dim,3,1,1)
+        self.res1 = ResBlockDown(dim,dim*2,3,64)
+        self.res2 = ResBlockDown(dim*2,dim*4,3,32)
+        self.res3 = ResBlockDown(dim*4,dim*8,3,16)
+        self.res4 = ResBlockDown(dim*8,dim*8,3,8)
+        self.fc = nn.Linear(4*4*8*dim,output_dim)
+
+    def forward(self,x):
+        x = self.conv(x)
+        x = self.res1(x)
+        x = self.res2(x)
+        x = self.res3(x)
+        x = self.res4(x)
+        x = x.view(len(x),-1)
+        x = self.fc(x)
+        return x
+
+
+class Generator(nn.Module):
+    def __init__(self):
+        self.fc = nn.Linear(dim,4*4*8*dim) #out dim*8,4,4
+        self.res1 = ResBlockUp(dim*8,dim*8,3,64) # out 
+        self.res2 = ResBlockUp(dim*8,dim*4,3,64)
+        self.res3 = ResBlockUp(dim*4,dim*2,3,64)
+        self.res4 = ResBlockUp(dim*2,dim,3,64)
+        self.conv = nn.Conv2d(dim,3,3,1,1)
+
+    def forward(self,x):
+        x = self.fc(x)
+        x = x.view((len(x),dim*8,4*4))
+        x = self.res1(x)
+        x = self.res2(x)
+        x = self.res3(x)
+        x = self.res4(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        x = self.conv(x)
+        x = self.tanh(x)
+        return x
+        
+        
+class Discriminator(nn.Module):
+    def __init__(self, dim=DIM):
+        super(Discriminator, self).__init__()
+        self.dim = dim
+
+        self.conv = nn.Conv2d(3,dim,3,1,1)
+        self.res1 = ResBlockDown(dim,dim*2,3,64)
+        self.res2 = ResBlockDown(dim*2,dim*4,3,32)
+        self.res3 = ResBlockDown(dim*4,dim*8,3,16)
+        self.res4 = ResBlockDown(dim*8,dim*8,3,8)
+        self.fc = nn.Linear(4*4*8*dim,output_dim)
+
+    def forward(self,x):
+        x = self.conv(x)
+        x = self.res1(x)
+        x = self.res2(x)
+        x = self.res3(x)
+        x = self.res4(x)
+        x = x.view((len(x),-1))
+        x = self.fc(x)
+        return torch.tanh(x)

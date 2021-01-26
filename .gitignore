@@ -1,0 +1,11 @@
+
+data/
+
+__pycache__/
+
+
+.vscode/settings.json
+
+.vscode/
+
+data/
